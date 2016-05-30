@@ -1,0 +1,180 @@
+---
+title: "Machine Learning Course Project"
+output: html_document
+---
+
+# Classifying quality of exercise using monitor data
+
+The goal of this project is to create a machine learning algorithm that can correctly identify the quality of barbell bicep curls by using data from belt, forearm, arm, and dumbbell monitors. There are five classifications of this exercise, one method is the correct form of the exercise while the other four are common mistakes: exactly according to the specification (Class A), throwing the elbows to the front (Class B), lifting the dumbbell only halfway (Class C), lowering the dumbbell only halfway (Class D) and throwing the hips to the front (Class E).
+
+# Loading the Data
+
+The first step is to load the data.
+
+```{r}
+training<-read.table("./pml-training.csv", header=TRUE, sep=",")
+testing<-read.table("./pml-testing.csv",header=TRUE, sep=",")
+```
+
+And to install the packages that will be used: caret & rattle.
+
+```{r}
+library(caret)
+```
+
+```{r}
+library(rattle)
+```
+
+```{r}
+library(gridExtra)
+```
+
+# Cleaning the data sets
+
+The data provided has many variables with missing data as well as information that is not relevant to the question being analyzed. Relevant variables are extracted using pattern recognition for relevant strings, leaving 52 variables.
+
+# Cleaning up Training data set
+
+```{r}
+trainingaccel<-grepl("^accel",names(training))
+trainingtotal<-grepl("^total",names(training))
+roll<-grepl("^roll",names(training))
+pitch<-grepl("^pitch",names(training))
+yaw<-grepl("^yaw",names(training))
+magnet<-grepl("^magnet",names(training))
+gyro<-grepl("^gyro",names(training))
+acceldata<-training[ ,trainingaccel]
+rolldata<-training[ ,roll]
+pitchdata<-training[ ,pitch]
+yawdata<-training[,yaw]
+magnetdata<-training[,magnet]
+gyrodata<-training[,gyro]
+totaldata<-training[,trainingtotal]
+trainClasse<-cbind(acceldata,rolldata,pitchdata,yawdata,magnetdata,gyrodata,totaldata,training[ ,160])
+colnames(trainClasse)[53]<-'Classe'
+```
+
+# Cleaning up Testing data set
+
+```{r}
+testingaccel<-grepl("^accel",names(testing))
+testingtotal<-grepl("^total",names(testing))
+troll<-grepl("^roll",names(testing))
+tpitch<-grepl("^pitch",names(testing))
+tyaw<-grepl("^yaw",names(testing))
+tmagnet<-grepl("^magnet",names(testing))
+tgyro<-grepl("^gyro",names(testing))
+tacceldata<-testing[ ,testingaccel]
+trolldata<-testing[ ,troll]
+tpitchdata<-testing[,tpitch]
+tyawdata<-testing[,tyaw]
+tmagnetdata<-testing[,tmagnet]
+tgyrodata<-testing[,tgyro]
+ttotaldata<-testing[,testingtotal]
+testClasse<-cbind(tacceldata,trolldata,tpitchdata,tyawdata,tmagnetdata,tgyrodata,ttotaldata,testing[ ,160])
+colnames(testClasse)[53]<-'problem.id'
+```
+
+# Making Training and Testing subset
+
+There are 19,622 observations in the training set, so in order to reduce time and to be able to perform cross-validation, a training subset is created with 60% of the original training data set to be used for training and the remaining 40% to be used as the testing set (before final testing is performed).
+
+```{r}
+set.seed(400)
+inTrain = createDataPartition(trainClasse$Classe, p = .60)[[1]]
+trainingsubset = trainClasse[ inTrain,]
+testingsubset = trainClasse[-inTrain,]
+```
+
+# rpart Model
+
+As the outcomes are categorical (nominal), a decision tree was the first model tested using the method rpart.
+
+```{r}
+set.seed(400)
+modFit<-train(Classe~.,method="rpart", data=trainingsubset)
+```
+
+```{r}
+print(modFit$finalModel)
+```
+
+```{r}
+fancyRpartPlot(modFit$finalModel,cex=.5,under.cex=1,shadow.offset=0)
+```
+
+```{r}
+classepredict=predict(modFit,testingsubset)
+confusionMatrix(testingsubset$Classe,classepredict)
+```
+
+The outcomes are not as definitive as one would hope in viewing the plot. In testing this model on the testing subset, it is revealed to have a 54.6% accuracy, which is only slightly better than chance. The variables used in the algorithm include roll_belt, pitch_forearm, yaw_belt,magnet_dumbbell_Z,pitch_belt, and magnet_dumbell_x. The model is the least accurate for outcome D.
+
+# Random Forest Model
+
+As the rpart model was largely inaccurate and the outcome variable appears to have more nuances in variable selection as demonstrated in the rpart tree, a random forest model was tested to see if that method fit the data more appropriately.
+
+```{r}
+modFit2 <- train(Classe ~ ., method="rf",trControl=trainControl(method = "cv", number = 4), data=trainingsubset)
+```
+
+```{r}
+print(modFit2)
+```
+
+```{r}
+varImp(modFit2)
+```
+
+```{r}
+classepredict2=predict(modFit2,testingsubset)
+confusionMatrix(testingsubset$Classe,classepredict2)
+```
+
+The random forest model has a 99.2% accuracy, far superior to the rpart method. The specificity and sensitivity is in the high 90s for all variables. The top five variables of importance included the roll_belt, yaw_belt,magnet_dumbbell_z,magnet_dumbbell_y, and the pitch_forearm. For outcome C, the model is the least accurate.Preprocessing was considered, but at the risk of overfitting the model was not tested due to the accuracy already being over 99%.
+
+Below are a few examples of how the data is more intricate than a discrete rpart model allow for, as it would require many yes/no statements to find all the different variations of each outcome.
+
+```{r}
+p1<-qplot(roll_belt,yaw_belt,colour=Classe,data=trainingsubset)
+p2<-qplot(roll_belt,pitch_forearm,colour=Classe,data=trainingsubset)
+grid.arrange(p1,p2,ncol=2)
+```
+
+```{r}
+dev.off()
+```
+
+# In Sample and Out of Sample Error
+
+The in sample error is error rate when the model is used to predict the training set it is based off. This error is going to be much less than the model predicting another dataset (out of sample error). For the random forest model used as the final algorithm, the in sample error rate is 0; the model is 100% accurate. This could be a sign of overfitting.
+
+```{r}
+insamplepredict=predict(modFit2,trainingsubset)
+confusionMatrix(trainingsubset$Classe,insamplepredict)
+```
+
+However, as shown previously, when the model is used on a separate data set the accuracy is still at 99.2%.
+
+```{r}
+classepredict2=predict(modFit2,testingsubset)
+confusionMatrix(testingsubset$Classe,classepredict2)
+```
+
+And when used on the original testing data set, the submitted answer resulted in 100% “You are correct!” I am hesitant to say this is equivalent to 100% accuracy as some problems may have had several solutions marked as correct to account for various students’ algorithms.For the purposes of this course, this testing on a new set of data gives more credence that the model accounts for the signal and not just the noise.
+
+```{r}
+testinganswers=predict(modFit2, newdata=testing)
+print(testinganswers)
+```
+
+It is also important to consider that the samples are all taken from one larger sample and that if the data were to be collected again during a different time period or with different participants the out of sample error could be higher and the algorithm may not be as accurate. This is especially true when considering that though there are many observations, the data comes for 6 participants which may not be representative of the population as a whole.
+
+# Conclusion
+
+Random Forest was a superior model for prediction of exercise quality compared to rpart. The nominal categories were dependent on various variables and the interaction between them. The RF model had over 99% accuracy and fitted well to other subsamples of the data. However, the algorithm may not have as high of accuracy on other samples, particularly ones with different subjects.
+
+In the first model D was the most difficult to predict and in the second C was the most difficult to predict. This makes theoretical sense as Class C is lifting the dumbbell only halfway and Class D is lowering the dumbbell only halfway. These movements may be hard to distinguish by the data collected and could be a topic for future research regarding how to detect this difference-if deemed important.
+
+Overall, it is interesting to consider how monitors are affected by the quality of an exercise and are able to predict the error made. This is an important indicator for health and fitness as it is not just the quantity of exercise that can be collected and analyzed but also the quality.
